@@ -21,6 +21,10 @@ contract CBAToken {
     using RLPReader for RLPReader.Iterator;
     using RLPReader for bytes;
     
+    using RLPReader for RLPReader.RLPItem;
+    using RLPReader for RLPReader.Iterator;
+    using RLPReader for bytes;
+    
     struct IssueData {
         address depositContractAddress;   // the contract which has burnt the tokens on the other blockchian
         address recipient;
