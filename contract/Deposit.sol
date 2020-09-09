@@ -6,14 +6,13 @@ pragma solidity >=0.4.22 <0.7.0;
  */
 contract Deposit {
 
-
-    string constant issuingBlockchainName = "ETH";
-    string constant networkName = "private";
-    uint constant gwei = 1000000000;
+    string constant public issuingBlockchainName = "ETH";
+    string constant public networkName = "private";
+    uint public constant gwei = 1000000000;
     uint public lockedBalances = 0;
-    mapping(address => uint256) lockedBalancesHistory;
+    mapping(address => uint256) public lockedBalancesHistory;
     // address ibcServerPublicKeyAddress = 0x72ba7d8e73fe8eb666ea66babc8116a41bfb10e2;
-    address otherContractAddress;
+    address public otherContractAddress;
     
     struct IssueRequest{
         uint issueRequestId;
