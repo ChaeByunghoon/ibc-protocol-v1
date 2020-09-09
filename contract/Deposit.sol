@@ -1,15 +1,16 @@
 pragma solidity >=0.4.22 <0.7.0;
 import "../RLPReader.sol";
 
+
 /**
  * @title Storage
  * @dev Store & retreive value in a variable
  */
 contract Deposit {
 
-    string public constant issuingBlockchainName = "ETH";
-    string public constant networkName = "private";
-    uint public constant gwei = 1000000000;
+    string constant issuingBlockchainName = "ETH";
+    string constant networkName = "private";
+    uint constant gwei = 1000000000;
     uint public lockedBalances = 0;
     mapping(address => uint256) lockedBalancesHistory;
     // address ibcServerPublicKeyAddress = 0x72ba7d8e73fe8eb666ea66babc8116a41bfb10e2;
@@ -72,6 +73,7 @@ contract Deposit {
         require(redeemData.claimContract == address(this), "Different targetAddress please check the transaction");
 
         _transfer(redeemData.value, payable(redeemData.recipient));
+        emit RedeemEvent(redeemData.recipient, redeemData.value);
     }
 
     // Call at handle Redeem
@@ -105,6 +107,6 @@ contract Deposit {
     }
 
     event IssueRequestEvent(address otherContractAddress, uint issueRequestId, address issuerAddress, address counterpartAddress, uint amount);
-    event RedeemRequestEvent(uint redeemRequestId, address issuer, uint amount, string backingBlockchainAddress);
+    event RedeemEvent(address redeemerAddress, uint amount);
 
 }
