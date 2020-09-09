@@ -132,11 +132,12 @@ contract CBAToken {
         issueData.claimContract = address(issueEventTopics[0].toUint());
         issueData.recipient = address(issueEventTopics[3].toUint());  // indices of indexed fields start at 1 (0 is reserved for the hash of the event signature)
         issueData.value = issueEventTopics[4].toUint();
+
         return issueData;
     }
 
     event TransferEvent(address indexed from, address indexed to, uint tokens);
     event IssueEvent(address indexed issuerAddress, uint amount);
-    event RedeemRequestEvent(uint redeemRequestId, address redeemerAddress, address counterpartAddress, uint amount);
+    event RedeemRequestEvent(address redeemerAddress, address counterpartAddress, uint amount);
 
 }
