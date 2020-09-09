@@ -83,7 +83,7 @@ contract CBAToken {
         // require(msg.sender == ibcServerPublicKeyAddress);
         require(balances[msg.sender] >= _amount);
         burn(msg.sender, _amount);
-        emit RedeemRequestEvent(redeemRequestId, msg.sender, _counterpartAddress, _amount);
+        emit RedeemRequestEvent(redeemRequestId, otherContractAddress, msg.sender, _counterpartAddress, _amount);
     }
 
 
@@ -136,8 +136,8 @@ contract CBAToken {
         return issueData;
     }
 
-    event TransferEvent(address indexed from, address indexed to, uint tokens);
+    event TransferEvent(address indexed from, address indexed to, uint amount);
     event IssueEvent(address indexed issuerAddress, uint amount);
-    event RedeemRequestEvent(address redeemerAddress, address counterpartAddress, uint amount);
+    event RedeemRequestEvent(uint redeemRequestId, address otherContractAddress, address redeemerAddress, address counterpartAddress, uint amount);
 
 }
