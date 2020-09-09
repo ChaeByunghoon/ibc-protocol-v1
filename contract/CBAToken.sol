@@ -87,11 +87,6 @@ contract CBAToken {
         burn(msg.sender, _amount);
         emit RedeemRequestEvent(redeemRequestId, msg.sender, _counterpartAddress, _amount);
     }
-
-    
-    function totalSupply() public view returns (uint){
-        return totalSupply_;
-    }
     
     function balanceOf(address owner) public view returns (uint balance){
         return balances[owner];
