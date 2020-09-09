@@ -53,7 +53,7 @@ contract Deposit {
         issueRequestId += 1;
         lockedBalances += msg.value;
         lockedBalancesHistory[msg.sender] = msg.value;
-        emit IssueRequestEvent(otherContractAddress, issueRequestId, msg.sender, _issueAddress, msg.value);
+        emit IssueRequestEvent(issueRequestId, otherContractAddress, msg.sender, _issueAddress, msg.value);
     }
 
     function totalLockedBalance() public view returns (uint){
@@ -106,7 +106,7 @@ contract Deposit {
         return redeemData;
     }
 
-    event IssueRequestEvent(address otherContractAddress, uint issueRequestId, address issuerAddress, address counterpartAddress, uint amount);
+    event IssueRequestEvent(uint issueRequestId, address otherContractAddress, address issuerAddress, address counterpartAddress, uint amount);
     event RedeemEvent(address redeemerAddress, uint amount);
 
 }
