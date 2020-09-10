@@ -1,6 +1,6 @@
 pragma solidity >=0.4.22 <0.7.0;
 import "../RLPReader.sol";
-
+import "../MerklePatriciaProof.sol";
 
 /**
  * @title Storage
@@ -23,10 +23,9 @@ contract Deposit {
 
     struct RedeemData {
         address issueContractAddress;   // the contract which has burnt the tokens on the other blockchian
-        address recipient;
+        address payable recipient;
         address claimContract;
         uint value;        // the value to create on this chain
-        bool isBurnValid;    // indicates whether the burning of tokens has taken place (didn't abort, e.g., due to require statement)
     }
 
     struct IssueRequest{
@@ -61,7 +60,7 @@ contract Deposit {
     }
 
     // IBC -Server call
-    function handleRedeem(bytes memory rlpEncodedTx, bytes memory rlpEncodedReceipt) public payable{
+    function handleRedeem(bytes memory rlpHeader, bytes memory rlpEncodedTx, bytes memory rlpEncodedReceipt, bytes memory rlpMerkleProofTx, bytes memory rlpMerkleProofReceipt, bytes memory path) public payable{
         // tx data includes [contract address, redeemerAddress, ]
         RedeemData memory redeemData = parsingRedeemTransaction(rlpEncodedTx, rlpEncodedReceipt);
         bytes32 txHash = keccak256(rlpEncodedTx);
@@ -72,7 +71,7 @@ contract Deposit {
         // Destination Check
         require(redeemData.claimContract == address(this), "Different targetAddress please check the transaction");
 
-        _transfer(redeemData.value, payable(redeemData.recipient));
+        _transfer(redeemData.value, redeemData.recipient);
         emit RedeemEvent(redeemData.recipient, redeemData.value);
     }
 
@@ -94,14 +93,14 @@ contract Deposit {
 
         // read logs
         RLPReader.RLPItem[] memory logs = receipt[4].toList();
-        RLPReader.RLPItem[] memory issueEventTuple = logs[1].toList();  // logs[0] contains the transfer event emitted by the ECR20 method _burn
+        RLPReader.RLPItem[] memory redeemEventTuple = logs[1].toList();  // logs[0] contains the transfer event emitted by the ECR20 method _burn
         // logs[1] contains the burn event emitted by the method burn (this contract)
-        RLPReader.RLPItem[] memory issueEventTopics = issueEventTuple[1].toList();  // topics contain all indexed event fields
+        RLPReader.RLPItem[] memory redeemEventTopics = redeemEventTuple[1].toList();  // topics contain all indexed event fields
 
         // read value and recipient from issue event
-        redeemData.claimContract = address(issueEventTopics[0].toUint());
-        redeemData.recipient = address(issueEventTopics[3].toUint());  // indices of indexed fields start at 1 (0 is reserved for the hash of the event signature)
-        redeemData.value = issueEventTopics[4].toUint();
+        redeemData.claimContract = address(redeemEventTopics[0].toUint());
+        redeemData.recipient = address(redeemEventTopics[3].toUint());  // indices of indexed fields start at 1 (0 is reserved for the hash of the event signature)
+        redeemData.value = redeemEventTopics[4].toUint();
 
         return redeemData;
     }
@@ -110,3 +109,79 @@ contract Deposit {
     event RedeemEvent(address redeemerAddress, uint amount);
 
 }
+
+contract Relay{
+
+    using RLPReader for *;
+    uint8 constant VERIFICATION_TYPE_TX = 1;
+    uint8 constant VERIFICATION_TYPE_RECEIPT = 2;
+
+    function verifyTransaction(uint feeInWei, bytes memory rlpHeader, uint8 noOfConfirmations, bytes memory rlpEncodedTx,
+        bytes memory path, bytes memory rlpEncodedNodes) payable public returns (uint8) {
+        uint8 result = verify(VERIFICATION_TYPE_TX, feeInWei, rlpHeader, noOfConfirmations, rlpEncodedTx, path, rlpEncodedNodes);
+        return result;
+    }
+
+    function verifyReceipt(uint feeInWei, bytes memory rlpHeader, uint8 noOfConfirmations, bytes memory rlpEncodedReceipt,
+        bytes memory path, bytes memory rlpEncodedNodes) payable public returns (uint8) {
+        uint8 result = verify(VERIFICATION_TYPE_RECEIPT, feeInWei, rlpHeader, noOfConfirmations, rlpEncodedReceipt, path, rlpEncodedNodes);
+        return result;
+    }
+
+    function verify(uint8 verificationType, uint feeInWei, bytes memory rlpHeader, uint8 noOfConfirmations, bytes memory rlpEncodedValue,
+        bytes memory path, bytes memory rlpEncodedNodes) private returns (uint8) {
+
+
+        bytes32 blockHash = keccak256(rlpHeader);
+        uint8 result;
+
+        if (verificationType == VERIFICATION_TYPE_TX) {
+            result = verifyMerkleProof(blockHash, noOfConfirmations, rlpEncodedValue, path, rlpEncodedNodes, getTxRoot(rlpHeader));
+        }
+        else if (verificationType == VERIFICATION_TYPE_RECEIPT) {
+            result = verifyMerkleProof(blockHash, noOfConfirmations, rlpEncodedValue, path, rlpEncodedNodes, getReceiptsRoot(rlpHeader));
+        }
+        else {
+            revert("Unknown verification type");
+        }
+
+        return result;
+    }
+
+    function verifyMerkleProof(bytes32 blockHash, uint8 noOfConfirmations, bytes memory rlpEncodedValue,
+        bytes memory path, bytes memory rlpEncodedNodes, bytes32 merkleRootHash) internal view returns (uint8) {
+
+        if (MerklePatriciaProof.verify(rlpEncodedValue, path, rlpEncodedNodes, merkleRootHash) > 0) {
+            return 1;
+        }
+
+        return 0;
+    }
+
+    function getTxRoot(bytes memory rlpHeader) internal pure returns (bytes32) {
+        RLPReader.Iterator memory it = rlpHeader.toRlpItem().iterator();
+        uint idx;
+        while(it.hasNext()) {
+            if ( idx == 4 ) return bytes32(it.next().toUint());
+            else it.next();
+
+            idx++;
+        }
+
+        return 0;
+    }
+
+    function getReceiptsRoot(bytes memory rlpHeader) internal pure returns (bytes32) {
+        RLPReader.Iterator memory it = rlpHeader.toRlpItem().iterator();
+        uint idx;
+        while(it.hasNext()) {
+            if ( idx == 5 ) return bytes32(it.next().toUint());
+            else it.next();
+
+            idx++;
+        }
+
+        return 0;
+    }
+}
+

@@ -1,5 +1,6 @@
 pragma solidity >=0.4.22 <0.7.0;
 import "../RLPReader.sol";
+import "../MerklePatriciaProof.sol";
 
 /**
  * @title Storage
@@ -12,10 +13,10 @@ contract CBAToken {
     uint256 public totalSupply_;
     mapping(address => uint256) public balances;
     // address ibcServerPublicKeyAddress = 0x72ba7d8e73fe8eb666ea66babc8116a41bfb10e2;
-    uint public issueRequestId = 0;
     uint public redeemRequestId = 0;
     address otherContractAddress;
     mapping(bytes32 => bool) public claimedTransactions;
+    RedeemRequest[] public redeemRequests;
 
     using RLPReader for RLPReader.RLPItem;
     using RLPReader for RLPReader.Iterator;
@@ -29,15 +30,6 @@ contract CBAToken {
         bool isBurnValid;    // indicates whether the burning of tokens has taken place (didn't abort, e.g., due to require statement)
     }
 
-    struct IssueLog{
-        address counterpartAddress;
-        address issueAddress;
-        // TODO Proof
-        bytes32 txData;
-        bytes32 txProof;
-        uint amount;
-    }
-
     struct RedeemRequest{
         uint id;
         uint amount;
@@ -45,10 +37,6 @@ contract CBAToken {
         string backingAddress;
         bool completed;
     }
-
-    IssueLog[] public issueLogs;
-    RedeemRequest[] public redeemRequests;
-    mapping(uint => address) public requestOwners;
 
     // For Contract Administrator
     function registerDepositContract(address tokenContract) public {
@@ -58,7 +46,7 @@ contract CBAToken {
 
     // Issue Reqeust From User
     // TODO bytes memory rlpHeader, bytes memory rlpMerkleProofTx, bytes memory rlpMerkleProofReceipt, bytes memory path
-    function handleIssue(bytes memory rlpEncodedTx, bytes memory rlpEncodedReceipt) public returns (uint){
+    function handleIssue(bytes memory rlpHeader, bytes memory rlpEncodedTx, bytes memory rlpEncodedReceipt, bytes memory rlpMerkleProofTx, bytes memory rlpMerkleProofReceipt, bytes memory path) public returns (uint){
         IssueData memory issueData = parsingIssueTransaction(rlpEncodedTx, rlpEncodedReceipt);
         bytes32 txHash = keccak256(rlpEncodedTx);
         // Check if tx is already claimed.
@@ -140,4 +128,77 @@ contract CBAToken {
     event IssueEvent(address indexed issuerAddress, uint amount);
     event RedeemRequestEvent(uint redeemRequestId, address otherContractAddress, address redeemerAddress, address counterpartAddress, uint amount);
 
+}
+
+contract Relay{
+
+    using RLPReader for *;
+    uint8 constant VERIFICATION_TYPE_TX = 1;
+    uint8 constant VERIFICATION_TYPE_RECEIPT = 2;
+
+    function verifyTransaction(uint feeInWei, bytes memory rlpHeader, uint8 noOfConfirmations, bytes memory rlpEncodedTx,
+        bytes memory path, bytes memory rlpEncodedNodes) payable public returns (uint8) {
+        uint8 result = verify(VERIFICATION_TYPE_TX, feeInWei, rlpHeader, noOfConfirmations, rlpEncodedTx, path, rlpEncodedNodes);
+        return result;
+    }
+
+    function verifyReceipt(uint feeInWei, bytes memory rlpHeader, uint8 noOfConfirmations, bytes memory rlpEncodedReceipt,
+        bytes memory path, bytes memory rlpEncodedNodes) payable public returns (uint8) {
+        uint8 result = verify(VERIFICATION_TYPE_RECEIPT, feeInWei, rlpHeader, noOfConfirmations, rlpEncodedReceipt, path, rlpEncodedNodes);
+        return result;
+    }
+
+    function verify(uint8 verificationType, uint feeInWei, bytes memory rlpHeader, uint8 noOfConfirmations, bytes memory rlpEncodedValue,
+        bytes memory path, bytes memory rlpEncodedNodes) private returns (uint8) {
+
+        bytes32 blockHash = keccak256(rlpHeader);
+        uint8 result;
+
+        if (verificationType == VERIFICATION_TYPE_TX) {
+            result = verifyMerkleProof(blockHash, noOfConfirmations, rlpEncodedValue, path, rlpEncodedNodes, getTxRoot(rlpHeader));
+        }
+        else if (verificationType == VERIFICATION_TYPE_RECEIPT) {
+            result = verifyMerkleProof(blockHash, noOfConfirmations, rlpEncodedValue, path, rlpEncodedNodes, getReceiptsRoot(rlpHeader));
+        }
+        else {
+            revert("Unknown verification type");
+        }
+
+        return result;
+    }
+
+    function verifyMerkleProof(bytes32 blockHash, uint8 noOfConfirmations, bytes memory rlpEncodedValue,
+        bytes memory path, bytes memory rlpEncodedNodes, bytes32 merkleRootHash) internal view returns (uint8) {
+
+        if (MerklePatriciaProof.verify(rlpEncodedValue, path, rlpEncodedNodes, merkleRootHash) > 0) {
+            return 1;
+        }
+
+        return 0;
+    }
+
+    function getTxRoot(bytes memory rlpHeader) internal pure returns (bytes32) {
+        RLPReader.Iterator memory it = rlpHeader.toRlpItem().iterator();
+        uint idx;
+        while(it.hasNext()) {
+            if (idx == 4) return bytes32(it.next().toUint());
+            else it.next();
+            idx++;
+        }
+
+        return 0;
+    }
+
+    function getReceiptsRoot(bytes memory rlpHeader) internal pure returns (bytes32) {
+        RLPReader.Iterator memory it = rlpHeader.toRlpItem().iterator();
+        uint idx;
+        while(it.hasNext()) {
+            if (idx == 5) return bytes32(it.next().toUint());
+            else it.next();
+
+            idx++;
+        }
+
+        return 0;
+    }
 }
