@@ -12,22 +12,36 @@ contract CBAToken {
     string public constant networkName = "private";
     uint256 public totalSupply_;
     mapping(address => uint256) public balances;
-    // address ibcServerPublicKeyAddress = 0x72ba7d8e73fe8eb666ea66babc8116a41bfb10e2;
+    address ibcServerPublicKeyAddress;
+    uint public issueRequestId = 0;
     uint public redeemRequestId = 0;
-    address otherContractAddress;
+    address depositContractAddress;
     mapping(bytes32 => bool) public claimedTransactions;
-    RedeemRequest[] public redeemRequests;
 
     using RLPReader for RLPReader.RLPItem;
     using RLPReader for RLPReader.Iterator;
     using RLPReader for bytes;
 
+    constructor(address _depositContractAddress) public {
+        ibcServerPublicKeyAddress = msg.sender;
+        depositContractAddress = _depositContractAddress;
+    }
+
     struct IssueData {
-        address depositContractAddress;   // the contract which has burnt the tokens on the other blockchian
-        address recipient;
+        address depositContractAddress;   // backing deposit contract Address
+        address issuerAddress;
         address claimContract;
         uint value;        // the value to create on this chain
         bool isBurnValid;    // indicates whether the burning of tokens has taken place (didn't abort, e.g., due to require statement)
+    }
+
+    struct IssueLog{
+        address counterpartAddress;
+        address issueAddress;
+        // TODO Proof
+        bytes32 txData;
+        bytes32 txProof;
+        uint amount;
     }
 
     struct RedeemRequest{
@@ -38,11 +52,16 @@ contract CBAToken {
         bool completed;
     }
 
+    IssueLog[] public issueLogs;
+    RedeemRequest[] public redeemRequests;
+    mapping(uint => address) public requestOwners;
+
     // For Contract Administrator
     function registerDepositContract(address tokenContract) public {
         require(tokenContract != address(0), "contract address must not be zero address");
-        otherContractAddress = tokenContract;
+        depositContractAddress = tokenContract;
     }
+
 
     // Issue Reqeust From User
     // TODO bytes memory rlpHeader, bytes memory rlpMerkleProofTx, bytes memory rlpMerkleProofReceipt, bytes memory path
@@ -52,7 +71,7 @@ contract CBAToken {
         // Check if tx is already claimed.
         require(claimedTransactions[txHash] == false, "The transaction is already submitted");
         // Check submitted tx contract address is equal in otherContractAddress
-        require(otherContractAddress == issueData.depositContractAddress, "burn contract address is not registered");
+        require(depositContractAddress == issueData.depositContractAddress, "burn contract address is not registered");
         // Destination Check
         require(issueData.claimContract == address(this), "Different targetAddress please check the transaction");
 
@@ -64,14 +83,14 @@ contract CBAToken {
         claimedTransactions[keccak256(rlpEncodedTx)] = true;
         balances[msg.sender] += issueData.value;
 
-        emit IssueEvent(issueData.recipient, issueData.value);
+        emit IssueEvent(issueData.issuerAddress, issueData.value);
     }
 
     function redeem(address _counterpartAddress, uint _amount) public payable{
         // require(msg.sender == ibcServerPublicKeyAddress);
         require(balances[msg.sender] >= _amount);
         burn(msg.sender, _amount);
-        emit RedeemRequestEvent(redeemRequestId, otherContractAddress, msg.sender, _counterpartAddress, _amount);
+        emit RedeemRequestEvent(redeemRequestId, depositContractAddress, address(this), msg.sender, _counterpartAddress, _amount);
     }
 
 
@@ -117,16 +136,18 @@ contract CBAToken {
         RLPReader.RLPItem[] memory issueEventTopics = issueEventTuple[1].toList();  // topics contain all indexed event fields
 
         // read value and recipient from issue event
-        issueData.claimContract = address(issueEventTopics[0].toUint());
-        issueData.recipient = address(issueEventTopics[3].toUint());  // indices of indexed fields start at 1 (0 is reserved for the hash of the event signature)
-        issueData.value = issueEventTopics[4].toUint();
+        issueData.depositContractAddress = address(issueEventTopics[2].toUint());
+        issueData.claimContract = address(issueEventTopics[3].toUint());
+        // counterpartAddress
+        issueData.issuerAddress = address(issueEventTopics[5].toUint());  // indices of indexed fields start at 1 (0 is reserved for the hash of the event signature)
+        issueData.value = issueEventTopics[6].toUint();
 
         return issueData;
     }
 
     event TransferEvent(address indexed from, address indexed to, uint amount);
     event IssueEvent(address indexed issuerAddress, uint amount);
-    event RedeemRequestEvent(uint redeemRequestId, address otherContractAddress, address redeemerAddress, address counterpartAddress, uint amount);
+    event RedeemRequestEvent(uint redeemRequestId, address otherContractAddress, address issuingContractAddress,address redeemerAddress, address counterpartAddress, uint amount);
 
 }
 

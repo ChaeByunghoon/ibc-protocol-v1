@@ -12,20 +12,27 @@ contract Deposit {
     string constant networkName = "private";
     uint constant gwei = 1000000000;
     uint public lockedBalances = 0;
-    mapping(address => uint256) lockedBalancesHistory;
+    mapping(address => uint256) public lockedBalancesHistory;
     // address ibcServerPublicKeyAddress = 0x72ba7d8e73fe8eb666ea66babc8116a41bfb10e2;
-    address otherContractAddress;
-    mapping(bytes32 => bool) redeemedTransactions;
+    mapping(address => bool) public participatingIssuingContract;
+    mapping(string => address) public issuingContractAddresses;
+    mapping(bytes32 => bool) public redeemedTransactions;
 
     using RLPReader for RLPReader.RLPItem;
     using RLPReader for RLPReader.Iterator;
     using RLPReader for bytes;
 
+    constructor(address _depositContractAddress) public {
+        ibcServerPublicKeyAddress = msg.sender;
+        depositContractAddress = _depositContractAddress;
+    }
+
     struct RedeemData {
         address issueContractAddress;   // the contract which has burnt the tokens on the other blockchian
-        address payable recipient;
-        address claimContract;
+        address payable redeemerAddress;
+        address claimContractAddress;
         uint value;        // the value to create on this chain
+        bool isBurnValid;    // indicates whether the burning of tokens has taken place (didn't abort, e.g., due to require statement)
     }
 
     struct IssueRequest{
@@ -39,20 +46,23 @@ contract Deposit {
     uint256 issueRequestId = 0;
     IssueRequest[] public issueRequests;
 
-    function registerCBAContract(address tokenContract) public {
-        require(tokenContract != address(0), "contract address must not be zero address");
-        otherContractAddress = tokenContract;
+    function registerCBAContract(string memory _blockchainName, address _issuingContractAddress) public {
+        require(_issuingContractAddress != address(0), "contract address must not be zero address");
+        issuingContractAddresses[_blockchainName] = _issuingContractAddress;
+        participatingIssuingContract[_issuingContractAddress] = true;
     }
 
 
-    function issue(address _issueAddress) public payable {
-        require(msg.value > 1 * gwei);
+    function issue(address _issueAddress, string memory blockchainName) public payable {
+        require(msg.value > 1 * gwei, "The value must higher than 1 gwei");
+        address addr = issuingContractAddresses[blockchainName];
+        require(participatingIssuingContract[addr] == true, "There is no participatingIssuing Contract");
 
-        issueRequests.push(IssueRequest(issueRequestId, otherContractAddress, msg.sender, _issueAddress, msg.value));
+        issueRequests.push(IssueRequest(issueRequestId, issuingContractAddresses[blockchainName], msg.sender, _issueAddress, msg.value));
         issueRequestId += 1;
         lockedBalances += msg.value;
         lockedBalancesHistory[msg.sender] = msg.value;
-        emit IssueRequestEvent(issueRequestId, otherContractAddress, msg.sender, _issueAddress, msg.value);
+        emit IssueRequestEvent(issueRequestId, address(this), issuingContractAddresses[blockchainName], msg.sender, _issueAddress, msg.value);
     }
 
     function totalLockedBalance() public view returns (uint){
@@ -67,12 +77,12 @@ contract Deposit {
         // Check if tx is already claimed.
         require(redeemedTransactions[txHash] == false, "The transaction is already submitted");
         // Check submitted tx contract address is equal in otherContractAddress
-        require(otherContractAddress == redeemData.issueContractAddress, "burn contract address is not registered");
+        require(participatingIssuingContract[redeemData.issueContractAddress] == true, "burn contract address is not registered");
         // Destination Check
-        require(redeemData.claimContract == address(this), "Different targetAddress please check the transaction");
+        require(redeemData.claimContractAddress == address(this), "Different targetAddress please check the transaction");
 
-        _transfer(redeemData.value, redeemData.recipient);
-        emit RedeemEvent(redeemData.recipient, redeemData.value);
+        _transfer(redeemData.value, redeemData.redeemerAddress);
+        emit RedeemEvent(redeemData.redeemerAddress, redeemData.value);
     }
 
     // Call at handle Redeem
@@ -98,14 +108,16 @@ contract Deposit {
         RLPReader.RLPItem[] memory redeemEventTopics = redeemEventTuple[1].toList();  // topics contain all indexed event fields
 
         // read value and recipient from issue event
-        redeemData.claimContract = address(redeemEventTopics[0].toUint());
-        redeemData.recipient = address(redeemEventTopics[3].toUint());  // indices of indexed fields start at 1 (0 is reserved for the hash of the event signature)
-        redeemData.value = redeemEventTopics[4].toUint();
+        //emit RedeemRequestEvent(redeemRequestId, depositContractAddress, address(this), msg.sender, _counterpartAddress, _amount);
+        redeemData.claimContractAddress = address(redeemEventTopics[2].toUint());
+        redeemData.issueContractAddress = address(redeemEventTopics[3].toUint());
+        redeemData.redeemerAddress = address(redeemEventTopics[5].toUint());  // indices of indexed fields start at 1 (0 is reserved for the hash of the event signature)
+        redeemData.value = redeemEventTopics[6].toUint();
 
         return redeemData;
     }
 
-    event IssueRequestEvent(uint issueRequestId, address otherContractAddress, address issuerAddress, address counterpartAddress, uint amount);
+    event IssueRequestEvent(uint issueRequestId, address depositContractAddress, address otherContractAddress, address issuerAddress, address counterpartAddress, uint amount);
     event RedeemEvent(address redeemerAddress, uint amount);
 
 }
@@ -130,7 +142,6 @@ contract Relay{
 
     function verify(uint8 verificationType, uint feeInWei, bytes memory rlpHeader, uint8 noOfConfirmations, bytes memory rlpEncodedValue,
         bytes memory path, bytes memory rlpEncodedNodes) private returns (uint8) {
-
 
         bytes32 blockHash = keccak256(rlpHeader);
         uint8 result;
