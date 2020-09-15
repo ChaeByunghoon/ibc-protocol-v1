@@ -11,7 +11,8 @@ contract Deposit {
     string constant issuingBlockchainName = "ETH";
     string constant networkName = "private";
     uint constant gwei = 1000000000;
-    uint public lockedBalances = 0;
+    // other contract address
+    mapping(address => uint256) lockedBalances;
     mapping(address => uint256) public lockedBalancesHistory;
     // address ibcServerPublicKeyAddress = 0x72ba7d8e73fe8eb666ea66babc8116a41bfb10e2;
     mapping(address => bool) public participatingIssuingContract;
@@ -21,11 +22,6 @@ contract Deposit {
     using RLPReader for RLPReader.RLPItem;
     using RLPReader for RLPReader.Iterator;
     using RLPReader for bytes;
-
-    constructor(address _depositContractAddress) public {
-        ibcServerPublicKeyAddress = msg.sender;
-        depositContractAddress = _depositContractAddress;
-    }
 
     struct RedeemData {
         address issueContractAddress;   // the contract which has burnt the tokens on the other blockchian
@@ -60,13 +56,9 @@ contract Deposit {
 
         issueRequests.push(IssueRequest(issueRequestId, issuingContractAddresses[blockchainName], msg.sender, _issueAddress, msg.value));
         issueRequestId += 1;
-        lockedBalances += msg.value;
+        lockedBalances[issuingContractAddresses[blockchainName]] += msg.value;
         lockedBalancesHistory[msg.sender] = msg.value;
         emit IssueRequestEvent(issueRequestId, address(this), issuingContractAddresses[blockchainName], msg.sender, _issueAddress, msg.value);
-    }
-
-    function totalLockedBalance() public view returns (uint){
-        return lockedBalances;
     }
 
     // IBC -Server call
@@ -81,13 +73,13 @@ contract Deposit {
         // Destination Check
         require(redeemData.claimContractAddress == address(this), "Different targetAddress please check the transaction");
 
-        _transfer(redeemData.value, redeemData.redeemerAddress);
+        _transfer(redeemData.value, redeemData.issueContractAddress, redeemData.redeemerAddress);
         emit RedeemEvent(redeemData.redeemerAddress, redeemData.value);
     }
 
     // Call at handle Redeem
-    function _transfer(uint _amount, address payable redeemerAddress) public payable{
-        lockedBalances -= _amount;
+    function _transfer(uint _amount, address otherContractAddress, address payable redeemerAddress) public payable{
+        lockedBalances[otherContractAddress] -= _amount;
         //
         redeemerAddress.transfer(_amount);
     }
